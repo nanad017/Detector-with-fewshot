@@ -64,15 +64,41 @@ def hex_to_png(hex_values: list[int], output_path: str, target_size: int = 256) 
     return True
 
 
-def convert_directory(input_dir: str, output_dir: str, target_size: int = 256) -> tuple[int, int]:
+def convert_directory(input_dir: str, output_dir: str, target_size: int = 256,
+                      class_name: str = None) -> tuple[int, int]:
     """
     Walk input_dir recursively. Each subdirectory = one class.
-    Convert all .exe/.dll files to .png in output_dir, preserving class structure.
+    If class_name is given, all files go to output_dir/class_name/ (flat input).
     Returns (success_count, skip_count).
     """
     success = 0
     skipped = 0
 
+    # Flat mode: all files → output_dir/class_name/
+    if class_name:
+        out_root = os.path.join(output_dir, class_name)
+        os.makedirs(out_root, exist_ok=True)
+        files_to_process = []
+        for root, dirs, files in os.walk(input_dir):
+            for fname in files:
+                if fname.lower().endswith(('.exe', '.dll')):
+                    files_to_process.append(os.path.join(root, fname))
+        for in_path in files_to_process:
+            base = os.path.splitext(os.path.basename(in_path))[0]
+            out_path = os.path.join(out_root, f"{base}.png")
+            if os.path.exists(out_path):
+                continue
+            try:
+                hex_vals = exe_to_bytes_hex(in_path)
+                if not hex_to_png(hex_vals, out_path, target_size):
+                    skipped += 1
+                else:
+                    success += 1
+            except Exception:
+                skipped += 1
+        return success, skipped
+
+    # Tree mode: subdirectories = classes
     for root, dirs, files in os.walk(input_dir):
         rel_path = os.path.relpath(root, input_dir)
         out_root = os.path.join(output_dir, rel_path)
@@ -81,37 +107,33 @@ def convert_directory(input_dir: str, output_dir: str, target_size: int = 256) -
         for fname in files:
             if not fname.lower().endswith(('.exe', '.dll')):
                 continue
-
             in_path = os.path.join(root, fname)
             base = os.path.splitext(fname)[0]
             out_path = os.path.join(out_root, f"{base}.png")
-
             if os.path.exists(out_path):
-                continue  # already converted
-
+                continue
             try:
                 hex_vals = exe_to_bytes_hex(in_path)
                 if not hex_to_png(hex_vals, out_path, target_size):
                     skipped += 1
-                    logger.debug("Skipped (empty/uniform): %s", in_path)
                 else:
                     success += 1
-            except Exception as e:
+            except Exception:
                 skipped += 1
-                logger.debug("Skipped %s: %s", in_path, e)
 
     return success, skipped
 
 
 def main():
     parser = argparse.ArgumentParser(description="Convert PE files to PNG images for CNN training")
-    parser.add_argument("--input_dir", required=True, help="Root directory with class subdirs containing .exe files")
+    parser.add_argument("--input_dir", required=True, help="Root directory with class subdirs or flat .exe files")
     parser.add_argument("--output_dir", required=True, help="Directory to write .png files")
     parser.add_argument("--target_size", type=int, default=256, help="PNG image size (default: 256)")
+    parser.add_argument("--class_name", default=None, help="Class name for flat directories (e.g. Benign)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
-    success, skipped = convert_directory(args.input_dir, args.output_dir, args.target_size)
+    success, skipped = convert_directory(args.input_dir, args.output_dir, args.target_size, args.class_name)
 
     logger.info("Conversion complete. %d success, %d skipped", success, skipped)
     if skipped > 0:
