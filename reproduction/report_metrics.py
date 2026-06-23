@@ -143,6 +143,11 @@ def main() -> None:
             default_classes=binary_classes,
         ),
         ModelResult(
+            "DeepMD (family adaptation)",
+            root / "deepmd_family" / "test_results.json",
+            root / "deepmd_family" / "class_names.json",
+        ),
+        ModelResult(
             "CNN (family)",
             root / "cnn" / "test_results.json",
             root / "cnn" / "class_indices.json",

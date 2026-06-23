@@ -62,6 +62,29 @@ tail -f deepmd.log
 
 Mặc định train `MalConvPlus`. Có thể truyền cùng hyperparameter model cho cả train và test khi chạy biến thể khác.
 
+## DeepMD family adaptation (chạy riêng)
+
+Pipeline này giữ PE header extractor và backbone `MalConvBase`/`MalConvPlus` của DeepMD, nhưng không gộp các malware family thành một nhãn `malware`. Thay vào đó script giữ nhãn `Benign` và từng thư mục malware family, thay lớp `fc` cuối bằng `num_families` logits, dùng weighted `CrossEntropyLoss`, và đánh giá bằng multiclass confusion matrix.
+
+```bash
+python reproduction/train_deepmd_family.py
+python reproduction/test_deepmd_family.py
+```
+
+Chạy nền bằng `nohup`:
+
+```bash
+nohup bash -c '
+  PYTHONUNBUFFERED=1 venv/bin/python reproduction/train_deepmd_family.py &&
+  PYTHONUNBUFFERED=1 venv/bin/python reproduction/test_deepmd_family.py
+' > deepmd_family.log 2>&1 &
+echo $!
+
+tail -f deepmd_family.log
+```
+
+Output mặc định nằm trong `reproduction_output/deepmd_family/`. Đây là DeepMD family adaptation trên dataset riêng, không phải objective nhị phân gốc của repository.
+
 ## CNN Keras gốc
 
 Adapter chuyển PE sang ảnh bằng thuật toán trong `utils/data_conversion.ipynb`. Keras resize ảnh thành RGB 256×256 và model giữ nguyên kiến trúc, loss, optimizer, class weight, batch size và 10 epoch của notebook combined classifier.
@@ -154,6 +177,37 @@ tail -f sorel.log
 
 Pipeline này giữ backbone `PENetwork` của SOREL nhưng thay malware binary head bằng một linear head dự đoán `Benign` và các malware family. Không thêm pipeline này vào `train_all.sh`/`test_all.sh`; chạy riêng để không làm luồng reproduction tổng dài hơn.
 
+Kiểm tra nhanh trước khi train:
+
+```bash
+cd ~/An_solo/detector
+source venv/bin/activate
+
+# Kiểm tra Python và các dependency chính
+python --version
+python - <<'PY'
+import importlib.util
+for name in ["torch", "lmdb", "msgpack", "sklearn", "thrember"]:
+    print(name, "OK" if importlib.util.find_spec(name) else "MISSING")
+PY
+
+# Kiểm tra script mới không còn lỗi cú pháp/import cơ bản
+python -m py_compile \
+  reproduction/sorel_family_data.py \
+  reproduction/sorel_family_model.py \
+  reproduction/train_sorel_family.py \
+  reproduction/test_sorel_family.py
+
+# Kiểm tra dataset root có đủ 4 thư mục train/test
+test -d "$HOME/An_solo/dataset/Virus/Virus train" && \
+test -d "$HOME/An_solo/dataset/Virus/Virus test" && \
+test -d "$HOME/An_solo/dataset/Benign/Benign train" && \
+test -d "$HOME/An_solo/dataset/Benign/Benign test" && \
+echo "dataset dirs OK"
+```
+
+Nếu các lệnh trên không báo lỗi, chạy train/test:
+
 ```bash
 python reproduction/train_sorel_family.py
 python reproduction/test_sorel_family.py
@@ -219,7 +273,7 @@ Sau khi một hoặc nhiều model đã test xong, chạy:
 python reproduction/report_metrics.py
 ```
 
-Script tự đọc kết quả của DeepMD, CNN, EMBER2024 binary/family, SOREL binary và SOREL family adaptation. Với mỗi model đã có kết quả, script in:
+Script tự đọc kết quả của DeepMD binary/family, CNN, EMBER2024 binary/family, SOREL binary và SOREL family adaptation. Với mỗi model đã có kết quả, script in:
 
 - Accuracy
 - Macro Precision
@@ -243,6 +297,7 @@ Phần này mô tả chính xác mức độ tái sử dụng source của từn
 | Project | Phần huấn luyện | Phần được giữ nguyên | Phần được viết/chỉnh lại | Cách nên mô tả trong báo cáo |
 |---|---|---|---|---|
 | deep-malware-detection | Gọi trực tiếp trainer gốc | Model, loss, optimizer, early stopping, loader và trích PE header | Chuẩn bị thư mục input và evaluator cho test ngoài | Chạy source gốc trên dataset riêng với adapter dữ liệu |
+| deep-malware-detection family | Script family riêng | PE header extractor, MalConv backbone, padding/header input | Nhãn family, linear multiclass head, weighted `CrossEntropyLoss`, evaluator multiclass | DeepMD MalConv family adaptation trên dataset riêng |
 | malware-classification-CNN | Chuyển notebook thành script local | Kiến trúc Keras, preprocessing ảnh đầu vào, loss, optimizer, class weight và số epoch | Đường dẫn, khám phá class, generator theo thư mục, lưu model và test | Tái triển khai trung thực notebook gốc thành script local |
 | ember2024 | Gọi trực tiếp example gốc | `train_lgbm.py`, `thrember.train_model()` và config LightGBM gốc | Adapter tạo memmap và evaluator không cần challenge set | Chạy example gốc trên feature EMBER v3 trích từ dataset riêng |
 | SOREL-20M | Gọi hàm train và `PENetwork` gốc | Backbone, malware head, optimizer, malware loss và LMDB reader | Feature v3, schema metadata tối giản, bỏ auxiliary targets và evaluator mới | Tái huấn luyện SOREL PENetwork binary trên dataset riêng; không phải full SOREL reproduction |
@@ -290,6 +345,23 @@ Evaluator mới chỉ load checkpoint và tính accuracy, F1, ROC AUC, confusion
 Cách mô tả đề xuất:
 
 > Chúng tôi chạy trực tiếp implementation PyTorch gốc của deep-malware-detection. Một adapter chỉ được sử dụng để ánh xạ cây thư mục dataset riêng sang hai lớp benign/malware và gọi bộ trích PE header đi kèm repository. Kiến trúc và training loop không bị thay đổi.
+
+#### Family adaptation chạy riêng
+
+`reproduction/train_deepmd_family.py` và `reproduction/test_deepmd_family.py` thêm một bài toán family classification riêng cho DeepMD:
+
+- vẫn gọi `extract_header.py` gốc để trích PE header;
+- vẫn dùng `MalConvBase` hoặc `MalConvPlus` làm backbone;
+- không gộp malware family thành một nhãn binary;
+- thêm class `Benign` và từng malware family vào `class_names.json`;
+- thay `fc` cuối từ 1 logit thành `num_families` logits;
+- thay `BCEWithLogitsLoss` bằng weighted `CrossEntropyLoss`;
+- kiểm tra SHA-256 trùng giữa split/family và dừng nếu có nguy cơ rò rỉ test hoặc nhãn mâu thuẫn;
+- evaluator ghi accuracy, macro precision/recall/F1, classification report và confusion matrix multiclass.
+
+Cách mô tả đề xuất:
+
+> Chúng tôi xây dựng một DeepMD family-classification adaptation bằng cách giữ PE header extractor và MalConv backbone của repository gốc, nhưng thay binary malware head bằng linear multiclass head cho `Benign` và các malware family trong dataset riêng. Đây là thí nghiệm mở rộng trên dataset riêng, không phải objective nhị phân gốc của deep-malware-detection.
 
 ### 2. malware-classification-CNN
 
@@ -456,6 +528,7 @@ Cách mô tả đề xuất:
 - Báo rõ dataset, số mẫu train/test thực tế và số PE bị feature extractor bỏ qua.
 - Không so sánh trực tiếp số accuracy/AUC với paper như thể cùng dataset.
 - Với DeepMD, ghi là original implementation + data adapter.
+- Với DeepMD family, ghi rõ đây là family adaptation riêng, giữ MalConv backbone nhưng thay binary head/loss.
 - Với CNN, ghi là faithful notebook-to-script conversion.
 - Với EMBER2024, ghi là original feature extractor/trainer/config + data adapter.
 - Với SOREL, luôn ghi rõ binary adaptation, EMBER v3 và không có auxiliary losses.

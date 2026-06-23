@@ -48,6 +48,8 @@ Một số project gốc bắt buộc lấy một phần train làm validation n
 - Truyền `--test_size 0.0` vào code gốc gây lỗi vì `sklearn.train_test_split` không chấp nhận `test_size=0.0`.
 - Bản sửa tạm thời cho `dataset.py` đã được gỡ; file hiện khớp lại với phiên bản trong repository.
 - Muốn giữ code hoàn toàn nguyên bản phải dùng tỷ lệ split hợp lệ mà code gốc hỗ trợ.
+- Đã thêm DeepMD family adaptation chạy riêng dưới `reproduction/`, giữ `extract_header.py` và MalConv backbone nhưng thay binary head/loss bằng multiclass family head và weighted `CrossEntropyLoss`.
+- Pipeline family này không thay thế pipeline DeepMD binary gốc; khi báo cáo phải gọi rõ là adaptation riêng trên dataset riêng.
 
 ## 2. malware-classification-CNN
 
@@ -186,7 +188,7 @@ Không xóa các file này khi chưa có xác nhận của người dùng. Sau k
 ## Trạng thái hiện tại
 
 - Đã đọc và xác định các entry point gốc.
-- Đã tạo các cặp train/test tự động trong `reproduction/` cho DeepMD, CNN Keras, EMBER2024 binary/family và SOREL binary.
+- Đã tạo các cặp train/test tự động trong `reproduction/` cho DeepMD binary/family, CNN Keras, EMBER2024 binary/family và SOREL binary.
 - Đã tạo `reproduction/train_all.sh` và `reproduction/test_all.sh` để chạy tuần tự trên Linux.
 - Chưa chạy huấn luyện thật vì dataset chỉ có trên máy Linux.
 - Chưa có kết quả accuracy/AUC/F1 mới.
