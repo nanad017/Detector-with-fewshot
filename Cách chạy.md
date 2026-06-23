@@ -1,24 +1,19 @@
-Cách chạy 
-Đơn giản:
+Cuối mỗi session dùng skill handoff.
+Khi mở session mới, gửi:
+Đọc các file sau để tiếp tục project:
 
+1. CLAUDE.md
+2. CONTEXT.md
+3. REPRODUCTION_NOTES.md
+4. reproduction/README.md
+5. C:\Users\admin\AppData\Local\Temp\sd-fsproto-handoff-2026-06-23.md
 
-cd ~/An_solo/detector
-source venv/bin/activate
-nohup bash scripts/train_all.sh > train_output.log 2>&1 &
-Giải thích:
+Sau đó kiểm tra git status, tóm tắt trạng thái hiện tại và tiếp tục từ handoff. Không sửa hoặc xóa file trước khi hiểu đầy đủ context.
+Nếu muốn AI hiểu kiến trúc tổng thể trước khi code, thêm:
+Dùng skill zoom-out để xem phần việc này nằm ở đâu trong kiến trúc SD-FSProto.
+Tóm lại:
+handoff: lưu trạng thái cho phiên sau.
+zoom-out: giúp phiên mới hiểu kiến trúc và bối cảnh rộng hơn.
+diagnose: dùng khi quá trình train/test báo lỗi.
 
-nohup — không tắt khi logout
-> train_output.log — ghi log ra file
-2>&1 — gộp cả lỗi vào cùng file log
-& — chạy ngầm
-Kiểm tra sau đó:
-
-
-# Xem process còn sống không
-ps aux | grep train_all
-
-# Xem log realtime
-tail -f train_output.log
-
-# Khi chạy xong, kiểm tra kết quả
-ls -la models/
+12:28 AM

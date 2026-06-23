@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import sqlite3
 import sys
 import tempfile
 import types
@@ -80,6 +82,130 @@ class EmberExtractionTests(unittest.TestCase):
                 sys.modules.pop("thrember.features", None)
             else:
                 sys.modules["thrember.features"] = old_features
+
+
+class SorelFamilyExtractionTests(unittest.TestCase):
+    def test_failed_feature_does_not_shift_family_labels_and_includes_benign(self):
+        extractor_module = types.ModuleType("thrember.features")
+
+        class FakeExtractor:
+            dim = 1
+
+            def feature_vector(self, bytez):
+                if bytez == b"bad":
+                    raise ValueError("invalid PE")
+                return np.array([bytez[0]], dtype=np.float32)
+
+        extractor_module.PEFeatureExtractor = FakeExtractor
+        package = types.ModuleType("thrember")
+        lmdb_module = types.ModuleType("lmdb")
+        msgpack_module = types.ModuleType("msgpack")
+
+        class FakeTransaction:
+            def __init__(self, store):
+                self.store = store
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def put(self, key, value):
+                self.store[key] = value
+
+        class FakeEnvironment:
+            def __init__(self):
+                self.store = {}
+
+            def begin(self, write=False):
+                return FakeTransaction(self.store)
+
+            def sync(self):
+                pass
+
+            def close(self):
+                pass
+
+        lmdb_module.open = lambda *args, **kwargs: FakeEnvironment()
+        msgpack_module.packb = lambda value, use_bin_type=True: repr(value).encode("utf-8")
+
+        old_package = sys.modules.get("thrember")
+        old_features = sys.modules.get("thrember.features")
+        old_lmdb = sys.modules.get("lmdb")
+        old_msgpack = sys.modules.get("msgpack")
+        sys.modules["thrember"] = package
+        sys.modules["thrember.features"] = extractor_module
+        sys.modules["lmdb"] = lmdb_module
+        sys.modules["msgpack"] = msgpack_module
+        try:
+            sorel_family_data = load_module(
+                "sorel_family_data", ROOT / "reproduction/sorel_family_data.py"
+            )
+            from common import DatasetPaths
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                for split in ("train", "test"):
+                    malware_a = root / "Virus" / f"Virus {split}" / "FamilyA"
+                    malware_b = root / "Virus" / f"Virus {split}" / "FamilyB"
+                    benign = root / "Benign" / f"Benign {split}"
+                    malware_a.mkdir(parents=True)
+                    malware_b.mkdir(parents=True)
+                    benign.mkdir(parents=True)
+                    malware_payload = b"a" if split == "train" else b"d"
+                    benign_payload = b"c" if split == "train" else b"e"
+                    (malware_a / "good.exe").write_bytes(malware_payload)
+                    (malware_b / "bad.exe").write_bytes(b"bad")
+                    (benign / "good.exe").write_bytes(benign_payload)
+
+                output = root / "output"
+                sorel_family_data.prepare_sorel_family_data(DatasetPaths(root), output)
+
+                family_names = json.loads(
+                    (output / "family_names.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(family_names, ["Benign", "FamilyA", "FamilyB"])
+
+                connection = sqlite3.connect(output / "meta.db")
+                rows = connection.execute(
+                    "SELECT is_malware, family_label FROM meta ORDER BY rl_fs_t, family_label"
+                ).fetchall()
+                connection.close()
+                self.assertEqual(rows, [(0, 0), (1, 1), (0, 0), (1, 1)])
+        finally:
+            if old_package is None:
+                sys.modules.pop("thrember", None)
+            else:
+                sys.modules["thrember"] = old_package
+            if old_features is None:
+                sys.modules.pop("thrember.features", None)
+            else:
+                sys.modules["thrember.features"] = old_features
+            if old_lmdb is None:
+                sys.modules.pop("lmdb", None)
+            else:
+                sys.modules["lmdb"] = old_lmdb
+            if old_msgpack is None:
+                sys.modules.pop("msgpack", None)
+            else:
+                sys.modules["msgpack"] = old_msgpack
+
+
+class SorelFamilyModelTests(unittest.TestCase):
+    def test_family_network_outputs_one_logit_per_family(self):
+        sys.path.insert(0, str(ROOT / "SOREL-20M"))
+        sorel_family_model = load_module(
+            "sorel_family_model", ROOT / "reproduction/sorel_family_model.py"
+        )
+        import torch
+
+        model = sorel_family_model.SorelFamilyNetwork(
+            feature_dimension=3,
+            num_families=4,
+        )
+        logits = model(torch.zeros(2, 3))
+        self.assertEqual(tuple(logits.shape), (2, 4))
 
 
 if __name__ == "__main__":
