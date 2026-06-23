@@ -284,6 +284,15 @@ class SorelFamilyModelTests(unittest.TestCase):
         logits = model(torch.zeros(2, 3))
         self.assertEqual(tuple(logits.shape), (2, 4))
 
+    def test_family_model_does_not_import_baker_dependent_sorel_dataset(self):
+        old_dataset = sys.modules.pop("dataset", None)
+        try:
+            load_module("sorel_family_model_no_dataset", ROOT / "reproduction/sorel_family_model.py")
+            self.assertNotIn("dataset", sys.modules)
+        finally:
+            if old_dataset is not None:
+                sys.modules["dataset"] = old_dataset
+
 
 if __name__ == "__main__":
     unittest.main()

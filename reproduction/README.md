@@ -444,6 +444,8 @@ Các phần đã thay hoặc không dùng:
 - thêm `family_label` vào SQLite để dataset trả về nhãn family;
 - thêm linear family head mới trên backbone để sinh logits theo số family thực tế.
 
+Ghi chú môi trường: `SOREL-20M/dataset.py` import thư viện `baker` cũ, có thể lỗi trên Python 3.12 vì `inspect.getargspec` đã bị xóa. Vì vậy `reproduction/sorel_family_model.py` có reader LMDB nhỏ riêng, giữ cùng logic hậu xử lý feature nhưng không import `dataset.py`.
+
 Cách mô tả đề xuất:
 
 > Chúng tôi xây dựng một family-classification adaptation riêng từ SOREL PENetwork bằng cách giữ backbone feature của PENetwork và thay output bằng linear head đa lớp cho `Benign` và các malware family. Đây là thí nghiệm mở rộng trên dataset riêng, không phải objective gốc của SOREL-20M.
