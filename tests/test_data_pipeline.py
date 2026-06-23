@@ -85,7 +85,7 @@ class EmberExtractionTests(unittest.TestCase):
 
 
 class SorelFamilyExtractionTests(unittest.TestCase):
-    def test_failed_feature_does_not_shift_family_labels_and_includes_benign(self):
+    def install_fake_sorel_family_dependencies(self):
         extractor_module = types.ModuleType("thrember.features")
 
         class FakeExtractor:
@@ -130,14 +130,27 @@ class SorelFamilyExtractionTests(unittest.TestCase):
         lmdb_module.open = lambda *args, **kwargs: FakeEnvironment()
         msgpack_module.packb = lambda value, use_bin_type=True: repr(value).encode("utf-8")
 
-        old_package = sys.modules.get("thrember")
-        old_features = sys.modules.get("thrember.features")
-        old_lmdb = sys.modules.get("lmdb")
-        old_msgpack = sys.modules.get("msgpack")
+        old_modules = {
+            "thrember": sys.modules.get("thrember"),
+            "thrember.features": sys.modules.get("thrember.features"),
+            "lmdb": sys.modules.get("lmdb"),
+            "msgpack": sys.modules.get("msgpack"),
+        }
         sys.modules["thrember"] = package
         sys.modules["thrember.features"] = extractor_module
         sys.modules["lmdb"] = lmdb_module
         sys.modules["msgpack"] = msgpack_module
+        return old_modules
+
+    def restore_modules(self, old_modules):
+        for name, old_module in old_modules.items():
+            if old_module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = old_module
+
+    def test_failed_feature_does_not_shift_family_labels_and_includes_benign(self):
+        old_modules = self.install_fake_sorel_family_dependencies()
         try:
             sorel_family_data = load_module(
                 "sorel_family_data", ROOT / "reproduction/sorel_family_data.py"
@@ -174,22 +187,43 @@ class SorelFamilyExtractionTests(unittest.TestCase):
                 connection.close()
                 self.assertEqual(rows, [(0, 0), (1, 1), (0, 0), (1, 1)])
         finally:
-            if old_package is None:
-                sys.modules.pop("thrember", None)
-            else:
-                sys.modules["thrember"] = old_package
-            if old_features is None:
-                sys.modules.pop("thrember.features", None)
-            else:
-                sys.modules["thrember.features"] = old_features
-            if old_lmdb is None:
-                sys.modules.pop("lmdb", None)
-            else:
-                sys.modules["lmdb"] = old_lmdb
-            if old_msgpack is None:
-                sys.modules.pop("msgpack", None)
-            else:
-                sys.modules["msgpack"] = old_msgpack
+            self.restore_modules(old_modules)
+
+    def test_duplicate_sha_reports_data_leak_before_sqlite_insert(self):
+        old_modules = self.install_fake_sorel_family_dependencies()
+        try:
+            sorel_family_data = load_module(
+                "sorel_family_data", ROOT / "reproduction/sorel_family_data.py"
+            )
+            from common import DatasetPaths
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                train_family = root / "Virus" / "Virus train" / "FamilyA"
+                test_family = root / "Virus" / "Virus test" / "FamilyA"
+                train_benign = root / "Benign" / "Benign train"
+                test_benign = root / "Benign" / "Benign test"
+                train_family.mkdir(parents=True)
+                test_family.mkdir(parents=True)
+                train_benign.mkdir(parents=True)
+                test_benign.mkdir(parents=True)
+                (train_family / "duplicate.exe").write_bytes(b"same")
+                (test_family / "duplicate.exe").write_bytes(b"same")
+                (train_benign / "benign.exe").write_bytes(b"a")
+                (test_benign / "benign.exe").write_bytes(b"b")
+
+                output = root / "output"
+                with self.assertRaisesRegex(ValueError, "Duplicate SHA-256"):
+                    sorel_family_data.prepare_sorel_family_data(DatasetPaths(root), output)
+
+                duplicates = json.loads(
+                    (output / "duplicate_sha256.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(len(duplicates), 1)
+                self.assertEqual(duplicates[0]["first"]["split"], "train")
+                self.assertEqual(duplicates[0]["duplicate"]["split"], "test")
+        finally:
+            self.restore_modules(old_modules)
 
 
 class SorelFamilyModelTests(unittest.TestCase):

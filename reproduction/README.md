@@ -173,6 +173,14 @@ tail -f sorel_family.log
 
 Output mặc định nằm trong `reproduction_output/sorel_family/`. Đây là family adaptation, không phải training objective gốc của SOREL-20M.
 
+Nếu lỗi `Duplicate SHA-256 samples found while preparing SOREL family data`, nghĩa là cùng một PE xuất hiện nhiều lần trong dataset sau khi tính SHA-256. Script sẽ ghi danh sách trùng vào:
+
+```text
+reproduction_output/sorel_family/data/duplicate_sha256.json
+```
+
+Không nên bỏ qua lỗi này nếu trùng giữa train và test, vì nó làm rò rỉ test. Cần mở file JSON trên, xem `first` và `duplicate`, rồi xóa hoặc di chuyển mẫu trùng trong dataset thật trước khi chạy lại.
+
 ## Chạy tuần tự tất cả
 
 ```bash

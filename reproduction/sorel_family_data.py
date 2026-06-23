@@ -42,13 +42,31 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
     extractor = PEFeatureExtractor()
     records = []
     failures = []
+    duplicates = []
+    seen_samples = {}
     with environment.begin(write=True) as transaction:
         for split in ("train", "test"):
             samples = list(iter_labeled_files(paths, split))
             for file_path, family, binary_label in tqdm(samples, desc=f"SOREL family {split}"):
                 sha256 = sha256_file(file_path)
+                sample = {
+                    "path": str(file_path),
+                    "split": split,
+                    "family": family,
+                    "binary_label": int(binary_label),
+                }
                 try:
                     vector = np.asarray(extractor.feature_vector(file_path.read_bytes()), dtype=np.float32)
+                    if sha256 in seen_samples:
+                        duplicates.append(
+                            {
+                                "sha256": sha256,
+                                "first": seen_samples[sha256],
+                                "duplicate": sample,
+                            }
+                        )
+                        continue
+                    seen_samples[sha256] = sample
                     payload = zlib.compress(msgpack.packb([vector.tolist()], use_bin_type=True))
                     transaction.put(sha256.encode("ascii"), payload)
                     timestamp = TRAIN_TIMESTAMP if split == "train" else TEST_TIMESTAMP
@@ -57,6 +75,18 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
                     failures.append({"path": str(file_path), "family": family, "error": str(exc)})
     environment.sync()
     environment.close()
+
+    (output_root / "duplicate_sha256.json").write_text(
+        json.dumps(duplicates, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output_root / "failed_features.json").write_text(
+        json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    if duplicates:
+        raise ValueError(
+            "Duplicate SHA-256 samples found while preparing SOREL family data. "
+            f"See {output_root / 'duplicate_sha256.json'}"
+        )
 
     if not records:
         raise RuntimeError("No SOREL family features were extracted")
@@ -78,9 +108,6 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
     connection.commit()
     connection.close()
 
-    (output_root / "failed_features.json").write_text(
-        json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
     (output_root / "dataset_info.json").write_text(
         json.dumps(
             {
@@ -89,6 +116,7 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
                 "num_families": len(family_names),
                 "samples": len(records),
                 "failed": len(failures),
+                "duplicates": len(duplicates),
             },
             indent=2,
         ),
