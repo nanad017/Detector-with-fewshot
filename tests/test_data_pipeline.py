@@ -225,6 +225,49 @@ class SorelFamilyExtractionTests(unittest.TestCase):
         finally:
             self.restore_modules(old_modules)
 
+    def test_same_split_same_family_duplicate_is_skipped(self):
+        old_modules = self.install_fake_sorel_family_dependencies()
+        try:
+            sorel_family_data = load_module(
+                "sorel_family_data", ROOT / "reproduction/sorel_family_data.py"
+            )
+            from common import DatasetPaths
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                train_family = root / "Virus" / "Virus train" / "FamilyA"
+                test_family = root / "Virus" / "Virus test" / "FamilyA"
+                train_benign = root / "Benign" / "Benign train"
+                test_benign = root / "Benign" / "Benign test"
+                train_family.mkdir(parents=True)
+                test_family.mkdir(parents=True)
+                train_benign.mkdir(parents=True)
+                test_benign.mkdir(parents=True)
+                (train_family / "sample-a.exe").write_bytes(b"same")
+                (train_family / "sample-b.exe").write_bytes(b"same")
+                (train_benign / "benign.exe").write_bytes(b"a")
+                (test_family / "sample.exe").write_bytes(b"c")
+                (test_benign / "benign.exe").write_bytes(b"b")
+
+                output = root / "output"
+                sorel_family_data.prepare_sorel_family_data(DatasetPaths(root), output)
+
+                skipped = json.loads(
+                    (output / "skipped_duplicate_sha256.json").read_text(encoding="utf-8")
+                )
+                blocking = json.loads(
+                    (output / "duplicate_sha256.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(len(skipped), 1)
+                self.assertEqual(blocking, [])
+
+                connection = sqlite3.connect(output / "meta.db")
+                sample_count = connection.execute("SELECT COUNT(*) FROM meta").fetchone()[0]
+                connection.close()
+                self.assertEqual(sample_count, 4)
+        finally:
+            self.restore_modules(old_modules)
+
 
 class SorelFamilyModelTests(unittest.TestCase):
     def test_family_network_outputs_one_logit_per_family(self):

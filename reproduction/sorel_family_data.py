@@ -43,6 +43,7 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
     records = []
     failures = []
     duplicates = []
+    skipped_duplicates = []
     seen_samples = {}
     with environment.begin(write=True) as transaction:
         for split in ("train", "test"):
@@ -58,13 +59,19 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
                 try:
                     vector = np.asarray(extractor.feature_vector(file_path.read_bytes()), dtype=np.float32)
                     if sha256 in seen_samples:
-                        duplicates.append(
-                            {
-                                "sha256": sha256,
-                                "first": seen_samples[sha256],
-                                "duplicate": sample,
-                            }
-                        )
+                        duplicate_record = {
+                            "sha256": sha256,
+                            "first": seen_samples[sha256],
+                            "duplicate": sample,
+                        }
+                        if (
+                            seen_samples[sha256]["split"] == sample["split"]
+                            and seen_samples[sha256]["family"] == sample["family"]
+                            and seen_samples[sha256]["binary_label"] == sample["binary_label"]
+                        ):
+                            skipped_duplicates.append(duplicate_record)
+                        else:
+                            duplicates.append(duplicate_record)
                         continue
                     seen_samples[sha256] = sample
                     payload = zlib.compress(msgpack.packb([vector.tolist()], use_bin_type=True))
@@ -78,6 +85,9 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
 
     (output_root / "duplicate_sha256.json").write_text(
         json.dumps(duplicates, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (output_root / "skipped_duplicate_sha256.json").write_text(
+        json.dumps(skipped_duplicates, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     (output_root / "failed_features.json").write_text(
         json.dumps(failures, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -117,6 +127,7 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
                 "samples": len(records),
                 "failed": len(failures),
                 "duplicates": len(duplicates),
+                "skipped_duplicates": len(skipped_duplicates),
             },
             indent=2,
         ),
@@ -125,6 +136,7 @@ def prepare_sorel_family_data(paths: DatasetPaths, output_root: Path) -> tuple[i
     print(
         "Stored "
         f"{len(records)} samples; failed={len(failures)}; "
+        f"skipped_duplicates={len(skipped_duplicates)}; "
         f"families={len(family_names)}; feature_dim={extractor.dim}"
     )
     return extractor.dim, family_names
